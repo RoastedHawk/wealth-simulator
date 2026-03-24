@@ -10,6 +10,7 @@ Adjust starting amount, monthly contributions, expected annual return, time hori
 - Monthly contribution + compounding simulation
 - Summary cards: Starting Amount, Total Contributions, Interest Earned, Final Value
 - Stacked area chart (Contributions + Interest)
+- Inflation-adjusted (real) view with Nominal vs Real toggle
 - Detailed results table
 - Tested simulation core with `pytest`
 - Linting with `ruff`
