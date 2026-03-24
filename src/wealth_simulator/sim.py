@@ -18,13 +18,14 @@ def simulate_monthly(
     monthly_contribution: float,
     annual_rate: float,
     years: int,
+    annual_inflation_rate: float = 0.0,
 ) -> pd.DataFrame:
     """
     Simulate monthly compounding with fixed monthly contributions.
 
-    annual_rate is expressed like 0.07 for 7%.
+    annual_rate and annual_inflation_rate are expressed like 0.07 for 7%.
     Returns a DataFrame with:
-      month, balance, contributions, interest
+      month, balance, contributions, interest, inflation_index, real_balance
     """
     if principal < 0:
         raise ValueError("principal must be >= 0")
@@ -35,9 +36,12 @@ def simulate_monthly(
 
     months = years * 12
     monthly_rate = annual_rate / 12.0
+    monthly_inflation = annual_inflation_rate / 12.0
 
     balance = float(principal)
     contrib_only = 0.0
+    inflation_index = 1.0
+
     rows: list[dict[str, float]] = []
 
     for m in range(months + 1):
@@ -46,17 +50,23 @@ def simulate_monthly(
         if interest < 0 and interest > -1e-9:
             interest = 0.0
 
+        real_balance = balance / inflation_index
+
         rows.append(
             {
                 "month": float(m),
                 "balance": balance,
                 "contributions": contributions,
                 "interest": interest,
+                "inflation_index": inflation_index,
+                "real_balance": real_balance,
             }
         )
 
+        # advance one month
         balance = balance * (1 + monthly_rate) + monthly_contribution
         contrib_only += monthly_contribution
+        inflation_index *= (1 + monthly_inflation)
 
     df = pd.DataFrame(rows)
     df["month"] = df["month"].astype(int)
