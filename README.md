@@ -1,17 +1,22 @@
- Wealth Simulator
+# Wealth Simulator
 
-Interactive wealth growth simulator built with **Python** + **Streamlit**.  
-Adjust starting amount, monthly contributions, expected annual return, time horizon, and currency to see a clear breakdown of **Contributions vs. Interest** over time.
+Interactive wealth growth simulator built with **Python** + **Streamlit**.
+
+Adjust starting amount, monthly contributions, expected annual return, time horizon, inflation, and currency to explore how your wealth could grow over time. Includes **Nominal vs Real (inflation-adjusted)** views and **scenario comparison** presets.
 
 ![Wealth Simulator screenshot](assets/app.png)
 
 ## Features
 - Currency selector (display formatting)
-- Monthly contribution + compounding simulation
-- Summary cards: Starting Amount, Total Contributions, Interest Earned, Final Value
-- Stacked area chart (Contributions + Interest)
-- Inflation-adjusted (real) view with Nominal vs Real toggle
+- Monthly contributions + compounding simulation
+- Nominal vs Real (inflation-adjusted) toggle
+- Scenario comparison mode (Conservative / Moderate / Aggressive presets)
+- Summary tiles (starting amount, contributions, interest, final value)
+- Interactive Altair charts:
+  - Single mode: stacked contributions vs. interest
+  - Compare mode: multi-line scenario chart + end-of-horizon tiles
 - Detailed results table
+- **Export results to CSV** (Download button)
 - Tested simulation core with `pytest`
 - Linting with `ruff`
 
