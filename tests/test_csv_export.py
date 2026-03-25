@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 
 # We will implement this in src/... soon.
 from wealth_simulator.export import dataframe_to_csv_bytes
