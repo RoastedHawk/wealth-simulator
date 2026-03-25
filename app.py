@@ -1,4 +1,5 @@
 import altair as alt
+import pandas as pd
 import streamlit as st
 
 from wealth_simulator.sim import simulate_monthly
@@ -36,16 +37,24 @@ st.markdown(
 st.title("Wealth Simulator")
 st.caption("Explore how your money could grow over time with contributions + compounding.")
 
+# ---------- Sidebar inputs ----------
 with st.sidebar:
     st.header("Inputs")
 
+    mode = st.radio("Mode", ["Single", "Compare scenarios"], horizontal=True)
+
+    st.subheader("Scenario Presets")
+    PRESETS = {
+        "Conservative": {"annual_rate_pct": 4.0, "inflation_pct": 2.5},
+        "Moderate": {"annual_rate_pct": 7.0, "inflation_pct": 2.5},
+        "Aggressive": {"annual_rate_pct": 10.0, "inflation_pct": 2.5},
+    }
+
     currency = st.selectbox(
         "Currency",
-        options=["USD ($)", "EUR (€)", "GBP (£)", "CHF (CHF)", "JPY (¥)"],
+        ["USD ($)", "EUR (€)", "GBP (£)", "CHF (CHF)", "JPY (¥)"],
         index=0,
-        help="Display currency for amounts (no FX conversion yet).",
     )
-
     currency_symbol = {
         "USD ($)": "$",
         "EUR (€)": "€",
@@ -59,45 +68,33 @@ with st.sidebar:
         min_value=0.0,
         value=10_000.0,
         step=500.0,
-        help="How much you start with today.",
     )
-
     monthly_contrib = st.number_input(
         f"Monthly contribution ({currency_symbol})",
         min_value=0.0,
         value=300.0,
         step=50.0,
-        help="How much you add every month.",
     )
+    years = st.slider("Years", 0, 50, 10, 1)
 
-    rate_pct = st.slider(
-        "Annual interest rate (%)",
-        min_value=0.0,
-        max_value=20.0,
-        value=7.0,
-        step=0.1,
-        help="Expected average annual return.",
-    )
+    if mode == "Single":
+        rate_pct = st.slider("Annual interest rate (%)", 0.0, 20.0, 7.0, 0.1)
+        inflation_pct = st.slider("Inflation rate (%)", 0.0, 15.0, 2.5, 0.1)
+        selected = []
+    else:
+        selected = st.multiselect(
+            "Select scenarios to compare",
+            options=list(PRESETS.keys()),
+            default=["Conservative", "Moderate", "Aggressive"],
+        )
+        # fallback values for the single-run summary/table below
+        rate_pct = PRESETS["Moderate"]["annual_rate_pct"]
+        inflation_pct = PRESETS["Moderate"]["inflation_pct"]
 
-    inflation_pct = st.slider(
-        "Inflation rate (%)",
-        min_value=0.0,
-        max_value=15.0,
-        value=2.5,
-        step=0.1,
-        help="Used to show inflation-adjusted (real) values.",
-    )
+def money(x: float) -> str:
+    return f"{currency_symbol}{x:,.2f}"
 
-    years = st.slider(
-        "Years",
-        min_value=0,
-        max_value=50,
-        value=10,
-        step=1,
-        help="How long you leave the money invested.",
-    )
-
-# ---------- Sim (from src/) ----------
+# ---------- One “primary” sim (used for summary + table) ----------
 df = simulate_monthly(
     principal=float(principal),
     monthly_contribution=float(monthly_contrib),
@@ -106,29 +103,18 @@ df = simulate_monthly(
     annual_inflation_rate=float(inflation_pct) / 100.0,
 )
 
-# ---------- Chart controls ----------
 st.subheader("Growth Over Time")
+view = st.radio("View", ["Nominal", "Real (inflation-adjusted)"], horizontal=True)
 
-view = st.radio(
-    "View",
-    options=["Nominal", "Real (inflation-adjusted)"],
-    horizontal=True,
-)
-
-# ---------- Summary computations ----------
+# ---------- Summary computations (based on selected view) ----------
 final_value = float(df["balance"].iloc[-1])
 total_contributions_only = float(df["contributions"].iloc[-1] - principal)
 interest_earned_total = float(df["interest"].iloc[-1])
 
 real_final_value = float(df["real_balance"].iloc[-1])
-# In "real" terms, compare against inflation-adjusted contributions at the end
 real_contributions_end = float(df["contributions"].iloc[-1] / df["inflation_index"].iloc[-1])
 real_interest_earned = float(real_final_value - real_contributions_end)
 
-def money(x: float) -> str:
-    return f"{currency_symbol}{x:,.2f}"
-
-# Choose what summary shows based on view
 if view == "Nominal":
     shown_interest = interest_earned_total
     shown_final = final_value
@@ -138,7 +124,6 @@ else:
     shown_final = real_final_value
     suffix = " (Real)"
 
-# ---------- Summary tiles (2x2 cards) ----------
 st.subheader("Summary")
 st.caption("Breakdown of what you put in vs what your investments earned.")
 
@@ -155,7 +140,7 @@ def card(title: str, value: str) -> None:
 
 r1 = st.columns(2)
 with r1[0]:
-    card("Starting Amount", money(principal))
+    card("Starting Amount", money(float(principal)))
 with r1[1]:
     card("Total Contributions", money(total_contributions_only))
 
@@ -167,62 +152,98 @@ with r2[1]:
 
 st.divider()
 
-# ---------- Build chart data based on view ----------
-if view == "Nominal":
-    stack_df = df[["month", "contributions", "interest"]].copy()
-    stack_df["interest"] = stack_df["interest"].clip(lower=0)
+# ---------- Chart ----------
+if mode == "Compare scenarios" and selected:
+    frames = []
+    for name in selected:
+        preset = PRESETS[name]
+        scenario_df = simulate_monthly(
+            principal=float(principal),
+            monthly_contribution=float(monthly_contrib),
+            annual_rate=float(preset["annual_rate_pct"]) / 100.0,
+            years=int(years),
+            annual_inflation_rate=float(preset["inflation_pct"]) / 100.0,
+        ).copy()
+        scenario_df["Scenario"] = name
+        frames.append(scenario_df)
 
-    value_vars = ["contributions", "interest"]
-    label_map = {"contributions": "Contributions", "interest": "Interest"}
-    order_map = {"Contributions": 0, "Interest": 1}
-else:
-    # Convert contributions and balance into "today's money" by dividing by inflation index
-    real_df = df[["month", "contributions", "inflation_index", "real_balance"]].copy()
-    real_df["real_contributions"] = real_df["contributions"] / real_df["inflation_index"]
-    real_df["real_interest"] = (real_df["real_balance"] - real_df["real_contributions"]).clip(lower=0)
+    compare_df = pd.concat(frames, ignore_index=True)
 
-    stack_df = real_df[["month", "real_contributions", "real_interest"]].copy()
+    # Scenario endpoint tiles (outside any loop!)
+    endpoints = compare_df.sort_values("month").groupby("Scenario", as_index=False).tail(1)
+    metric_col = "balance" if view == "Nominal" else "real_balance"
+    st.caption("Scenario outcomes at the end of the horizon")
+    cols = st.columns(len(selected))
+    for col, name in zip(cols, selected):
+        value = float(endpoints.loc[endpoints["Scenario"] == name, metric_col].iloc[0])
+        col.metric(name, money(value))
 
-    value_vars = ["real_contributions", "real_interest"]
-    label_map = {"real_contributions": "Contributions (Real)", "real_interest": "Interest (Real)"}
-    order_map = {"Contributions (Real)": 0, "Interest (Real)": 1}
+    y_col = "balance" if view == "Nominal" else "real_balance"
+    y_title = "Balance" if view == "Nominal" else "Real Balance"
 
-long_df = stack_df.melt(
-    id_vars="month",
-    value_vars=value_vars,
-    var_name="component",
-    value_name="amount",
-)
-long_df["component"] = long_df["component"].map(label_map)
-long_df["stack_order"] = long_df["component"].map(order_map)
-
-area = (
-    alt.Chart(long_df)
-    .mark_area()
-    .encode(
-        x=alt.X("month:Q", title="Month"),
-        y=alt.Y(
-            "amount:Q",
-            title="Amount",
-            stack="zero",
-            axis=alt.Axis(format="~s", tickCount=6),
-        ),
-        color=alt.Color(
-            "component:N",
-            title="",
-            legend=alt.Legend(orient="bottom"),
-        ),
-        order=alt.Order("stack_order:Q", sort="ascending"),
-        tooltip=[
-            alt.Tooltip("month:Q", title="Month"),
-            alt.Tooltip("component:N", title="Component"),
-            alt.Tooltip("amount:Q", title="Amount", format=",.2f"),
-        ],
+    line = (
+        alt.Chart(compare_df)
+        .mark_line()
+        .encode(
+            x=alt.X("month:Q", title="Month"),
+            y=alt.Y(f"{y_col}:Q", title=y_title, axis=alt.Axis(format="~s", tickCount=6)),
+            color=alt.Color("Scenario:N", title="Scenario"),
+            tooltip=[
+                alt.Tooltip("Scenario:N"),
+                alt.Tooltip("month:Q", title="Month"),
+                alt.Tooltip(f"{y_col}:Q", title=y_title, format=",.2f"),
+            ],
+        )
+        .properties(height=380)
+        .interactive()
     )
-)
+    st.altair_chart(line, use_container_width=True)
 
-st.altair_chart(area.properties(height=380).interactive(), use_container_width=True)
+else:
+    # Single-mode stacked chart (matches view)
+    if view == "Nominal":
+        stack_df = df[["month", "contributions", "interest"]].copy()
+        stack_df["interest"] = stack_df["interest"].clip(lower=0)
+        value_vars = ["contributions", "interest"]
+        label_map = {"contributions": "Contributions", "interest": "Interest"}
+        order_map = {"Contributions": 0, "Interest": 1}
+    else:
+        real_df = df[["month", "contributions", "inflation_index", "real_balance"]].copy()
+        real_df["real_contributions"] = real_df["contributions"] / real_df["inflation_index"]
+        real_df["real_interest"] = (real_df["real_balance"] - real_df["real_contributions"]).clip(lower=0)
 
+        stack_df = real_df[["month", "real_contributions", "real_interest"]].copy()
+        value_vars = ["real_contributions", "real_interest"]
+        label_map = {"real_contributions": "Contributions (Real)", "real_interest": "Interest (Real)"}
+        order_map = {"Contributions (Real)": 0, "Interest (Real)": 1}
+
+    long_df = stack_df.melt(
+        id_vars="month",
+        value_vars=value_vars,
+        var_name="component",
+        value_name="amount",
+    )
+    long_df["component"] = long_df["component"].map(label_map)
+    long_df["stack_order"] = long_df["component"].map(order_map)
+
+    area = (
+        alt.Chart(long_df)
+        .mark_area()
+        .encode(
+            x=alt.X("month:Q", title="Month"),
+            y=alt.Y("amount:Q", title="Amount", stack="zero", axis=alt.Axis(format="~s", tickCount=6)),
+            color=alt.Color("component:N", title="", legend=alt.Legend(orient="bottom")),
+            order=alt.Order("stack_order:Q", sort="ascending"),
+            tooltip=[
+                alt.Tooltip("month:Q", title="Month"),
+                alt.Tooltip("component:N", title="Component"),
+                alt.Tooltip("amount:Q", title="Amount", format=",.2f"),
+            ],
+        )
+    )
+    st.altair_chart(area.properties(height=380).interactive(), use_container_width=True)
+
+# ---------- Table (single-run) ----------
 with st.expander("See Table"):
     display_df = (
         df.rename(
