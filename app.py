@@ -2,6 +2,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from wealth_simulator.export import dataframe_to_csv_bytes
 from wealth_simulator.sim import simulate_monthly
 
 st.set_page_config(page_title="Wealth Simulator", layout="wide")
@@ -80,7 +81,7 @@ with st.sidebar:
     if mode == "Single":
         rate_pct = st.slider("Annual interest rate (%)", 0.0, 20.0, 7.0, 0.1)
         inflation_pct = st.slider("Inflation rate (%)", 0.0, 15.0, 2.5, 0.1)
-        selected = []
+        selected: list[str] = []
     else:
         selected = st.multiselect(
             "Select scenarios to compare",
@@ -91,8 +92,10 @@ with st.sidebar:
         rate_pct = PRESETS["Moderate"]["annual_rate_pct"]
         inflation_pct = PRESETS["Moderate"]["inflation_pct"]
 
+
 def money(x: float) -> str:
     return f"{currency_symbol}{x:,.2f}"
+
 
 # ---------- One “primary” sim (used for summary + table) ----------
 df = simulate_monthly(
@@ -127,6 +130,7 @@ else:
 st.subheader("Summary")
 st.caption("Breakdown of what you put in vs what your investments earned.")
 
+
 def card(title: str, value: str) -> None:
     st.markdown(
         f"""
@@ -137,6 +141,7 @@ def card(title: str, value: str) -> None:
 """,
         unsafe_allow_html=True,
     )
+
 
 r1 = st.columns(2)
 with r1[0]:
@@ -154,7 +159,7 @@ st.divider()
 
 # ---------- Chart ----------
 if mode == "Compare scenarios" and selected:
-    frames = []
+    frames: list[pd.DataFrame] = []
     for name in selected:
         preset = PRESETS[name]
         scenario_df = simulate_monthly(
@@ -169,7 +174,7 @@ if mode == "Compare scenarios" and selected:
 
     compare_df = pd.concat(frames, ignore_index=True)
 
-    # Scenario endpoint tiles (outside any loop!)
+    # Scenario endpoint tiles
     endpoints = compare_df.sort_values("month").groupby("Scenario", as_index=False).tail(1)
     metric_col = "balance" if view == "Nominal" else "real_balance"
     st.caption("Scenario outcomes at the end of the horizon")
@@ -210,11 +215,16 @@ else:
     else:
         real_df = df[["month", "contributions", "inflation_index", "real_balance"]].copy()
         real_df["real_contributions"] = real_df["contributions"] / real_df["inflation_index"]
-        real_df["real_interest"] = (real_df["real_balance"] - real_df["real_contributions"]).clip(lower=0)
+        real_df["real_interest"] = (real_df["real_balance"] - real_df["real_contributions"]).clip(
+            lower=0
+        )
 
         stack_df = real_df[["month", "real_contributions", "real_interest"]].copy()
         value_vars = ["real_contributions", "real_interest"]
-        label_map = {"real_contributions": "Contributions (Real)", "real_interest": "Interest (Real)"}
+        label_map = {
+            "real_contributions": "Contributions (Real)",
+            "real_interest": "Interest (Real)",
+        }
         order_map = {"Contributions (Real)": 0, "Interest (Real)": 1}
 
     long_df = stack_df.melt(
@@ -259,7 +269,17 @@ with st.expander("See Table"):
         .copy()
     )
 
+    # Round for display/export consistency
+    rounded_df = display_df.copy()
     for col in ["Contributions", "Interest", "Balance", "Real Balance"]:
-        display_df[col] = display_df[col].round(2)
+        rounded_df[col] = rounded_df[col].round(2)
 
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    csv_bytes = dataframe_to_csv_bytes(rounded_df)
+    st.download_button(
+        label="Download CSV",
+        data=csv_bytes,
+        file_name="wealth_simulator_results.csv",
+        mime="text/csv",
+    )
+
+    st.dataframe(rounded_df, use_container_width=True, hide_index=True)
