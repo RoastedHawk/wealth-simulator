@@ -3,12 +3,17 @@ import pandas as pd
 import streamlit as st
 
 from wealth_simulator.export import dataframe_to_csv_bytes
+from wealth_simulator.goals import time_to_target
 from wealth_simulator.sim import simulate_monthly
 from wealth_simulator.theme import PRESET_THEMES, theme_css
 
 st.set_page_config(page_title="Wealth Simulator", layout="wide")
 
-# ---------- Base styling for custom cards (theme colors come from theme_css) ----------
+# -----------------------------------------------------------------------------
+# Base styling for custom cards.
+# NOTE: Colors are controlled by the runtime theme CSS (theme_css).
+# This block only defines spacing/typography so themes can "win" visually.
+# -----------------------------------------------------------------------------
 st.markdown(
     """
 <style>
@@ -33,16 +38,21 @@ st.markdown(
 st.title("Wealth Simulator")
 st.caption("Explore how your money could grow over time with contributions + compounding.")
 
-# ---------- Sidebar inputs ----------
+# -----------------------------------------------------------------------------
+# Sidebar inputs
+# -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("Inputs")
 
+    # ---- Theme (runtime) ----
     st.subheader("Theme")
     theme_name = st.selectbox("Color style", list(PRESET_THEMES.keys()), index=0)
     theme = PRESET_THEMES[theme_name]
 
+    # ---- Mode ----
     mode = st.radio("Mode", ["Single", "Compare scenarios"], horizontal=True)
 
+    # ---- Scenario presets ----
     st.subheader("Scenario Presets")
     PRESETS = {
         "Conservative": {"annual_rate_pct": 4.0, "inflation_pct": 2.5},
@@ -50,6 +60,7 @@ with st.sidebar:
         "Aggressive": {"annual_rate_pct": 10.0, "inflation_pct": 2.5},
     }
 
+    # ---- Currency formatting ----
     currency = st.selectbox(
         "Currency",
         ["USD ($)", "EUR (€)", "GBP (£)", "CHF (CHF)", "JPY (¥)"],
@@ -63,6 +74,7 @@ with st.sidebar:
         "JPY (¥)": "¥",
     }[currency]
 
+    # ---- Core inputs ----
     principal = st.number_input(
         f"Starting amount ({currency_symbol})",
         min_value=0.0,
@@ -77,6 +89,7 @@ with st.sidebar:
     )
     years = st.slider("Years", 0, 50, 10, 1)
 
+    # ---- Single vs compare configuration ----
     if mode == "Single":
         rate_pct = st.slider("Annual interest rate (%)", 0.0, 20.0, 7.0, 0.1)
         inflation_pct = st.slider("Inflation rate (%)", 0.0, 15.0, 2.5, 0.1)
@@ -91,7 +104,18 @@ with st.sidebar:
         rate_pct = PRESETS["Moderate"]["annual_rate_pct"]
         inflation_pct = PRESETS["Moderate"]["inflation_pct"]
 
-# Apply runtime theme (must be after sidebar selection)
+    # ---- Goal mode ----
+    st.subheader("Goal Mode")
+    goal_enabled = st.toggle("Enable Goal Mode", value=False)
+    goal_target = st.number_input(
+        f"Target amount ({currency_symbol})",
+        min_value=0.0,
+        value=100_000.0,
+        step=1_000.0,
+        disabled=not goal_enabled,
+    )
+
+# Apply runtime theme after user chooses it in the sidebar
 st.markdown(theme_css(theme), unsafe_allow_html=True)
 
 
@@ -99,7 +123,21 @@ def money(x: float) -> str:
     return f"{currency_symbol}{x:,.2f}"
 
 
-# ---------- One “primary” sim (used for summary + table) ----------
+def format_horizon(month: int) -> str:
+    """Format a month count as 'Xy Ym'."""
+    years_ = month // 12
+    rem = month % 12
+    parts: list[str] = []
+    if years_:
+        parts.append(f"{years_}y")
+    if rem or not parts:
+        parts.append(f"{rem}m")
+    return " ".join(parts)
+
+
+# -----------------------------------------------------------------------------
+# Primary simulation (used for summary + table + goal mode)
+# -----------------------------------------------------------------------------
 df = simulate_monthly(
     principal=float(principal),
     monthly_contribution=float(monthly_contrib),
@@ -111,7 +149,9 @@ df = simulate_monthly(
 st.subheader("Growth Over Time")
 view = st.radio("View", ["Nominal", "Real (inflation-adjusted)"], horizontal=True)
 
-# ---------- Summary computations (based on selected view) ----------
+# -----------------------------------------------------------------------------
+# Summary computations (based on selected view)
+# -----------------------------------------------------------------------------
 final_value = float(df["balance"].iloc[-1])
 total_contributions_only = float(df["contributions"].iloc[-1] - principal)
 interest_earned_total = float(df["interest"].iloc[-1])
@@ -159,7 +199,34 @@ with r2[1]:
 
 st.divider()
 
-# ---------- Chart ----------
+# -----------------------------------------------------------------------------
+# Goal mode: time-to-target (Nominal + Real)
+# -----------------------------------------------------------------------------
+if goal_enabled:
+    st.subheader("Goal Mode")
+    st.caption("Estimated time to reach your target based on the selected inputs.")
+
+    nominal_res = time_to_target(df, target=float(goal_target), column="balance")
+    real_res = time_to_target(df, target=float(goal_target), column="real_balance")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if nominal_res.reached and nominal_res.month is not None:
+            st.metric("Time to target (Nominal)", format_horizon(nominal_res.month))
+        else:
+            st.metric("Time to target (Nominal)", "Not reached")
+
+    with c2:
+        if real_res.reached and real_res.month is not None:
+            st.metric("Time to target (Real)", format_horizon(real_res.month))
+        else:
+            st.metric("Time to target (Real)", "Not reached")
+
+    st.divider()
+
+# -----------------------------------------------------------------------------
+# Charts
+# -----------------------------------------------------------------------------
 if mode == "Compare scenarios" and selected:
     frames: list[pd.DataFrame] = []
     for name in selected:
@@ -247,7 +314,12 @@ else:
         .mark_area()
         .encode(
             x=alt.X("month:Q", title="Month"),
-            y=alt.Y("amount:Q", title="Amount", stack="zero", axis=alt.Axis(format="~s", tickCount=6)),
+            y=alt.Y(
+                "amount:Q",
+                title="Amount",
+                stack="zero",
+                axis=alt.Axis(format="~s", tickCount=6),
+            ),
             color=alt.Color(
                 "component:N",
                 title="",
@@ -261,10 +333,14 @@ else:
                 alt.Tooltip("amount:Q", title="Amount", format=",.2f"),
             ],
         )
+        .properties(height=380)
+        .interactive()
     )
-    st.altair_chart(area.properties(height=380).interactive(), use_container_width=True)
+    st.altair_chart(area, use_container_width=True)
 
-# ---------- Table (single-run) ----------
+# -----------------------------------------------------------------------------
+# Table + CSV export (primary sim)
+# -----------------------------------------------------------------------------
 with st.expander("See Table"):
     display_df = (
         df.rename(
