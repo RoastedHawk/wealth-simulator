@@ -4,25 +4,20 @@ import streamlit as st
 
 from wealth_simulator.export import dataframe_to_csv_bytes
 from wealth_simulator.sim import simulate_monthly
+from wealth_simulator.theme import PRESET_THEMES, theme_css
 
 st.set_page_config(page_title="Wealth Simulator", layout="wide")
 
-# ---------- Styling (cards) ----------
+# ---------- Base styling for custom cards (theme colors come from theme_css) ----------
 st.markdown(
     """
 <style>
 .card {
-  border: 1px solid rgba(120,120,120,0.25);
   border-radius: 14px;
   padding: 14px 16px;
-  background: rgba(255,255,255,0.55);
-}
-@media (prefers-color-scheme: dark) {
-  .card { background: rgba(30,30,30,0.35); }
 }
 .card-title {
   font-size: 0.9rem;
-  opacity: 0.8;
   margin-bottom: 6px;
 }
 .card-value {
@@ -41,6 +36,10 @@ st.caption("Explore how your money could grow over time with contributions + com
 # ---------- Sidebar inputs ----------
 with st.sidebar:
     st.header("Inputs")
+
+    st.subheader("Theme")
+    theme_name = st.selectbox("Color style", list(PRESET_THEMES.keys()), index=0)
+    theme = PRESET_THEMES[theme_name]
 
     mode = st.radio("Mode", ["Single", "Compare scenarios"], horizontal=True)
 
@@ -91,6 +90,9 @@ with st.sidebar:
         # fallback values for the single-run summary/table below
         rate_pct = PRESETS["Moderate"]["annual_rate_pct"]
         inflation_pct = PRESETS["Moderate"]["inflation_pct"]
+
+# Apply runtime theme (must be after sidebar selection)
+st.markdown(theme_css(theme), unsafe_allow_html=True)
 
 
 def money(x: float) -> str:
@@ -192,7 +194,11 @@ if mode == "Compare scenarios" and selected:
         .encode(
             x=alt.X("month:Q", title="Month"),
             y=alt.Y(f"{y_col}:Q", title=y_title, axis=alt.Axis(format="~s", tickCount=6)),
-            color=alt.Color("Scenario:N", title="Scenario"),
+            color=alt.Color(
+                "Scenario:N",
+                title="Scenario",
+                scale=alt.Scale(range=list(theme.chart_palette)),
+            ),
             tooltip=[
                 alt.Tooltip("Scenario:N"),
                 alt.Tooltip("month:Q", title="Month"),
@@ -242,7 +248,12 @@ else:
         .encode(
             x=alt.X("month:Q", title="Month"),
             y=alt.Y("amount:Q", title="Amount", stack="zero", axis=alt.Axis(format="~s", tickCount=6)),
-            color=alt.Color("component:N", title="", legend=alt.Legend(orient="bottom")),
+            color=alt.Color(
+                "component:N",
+                title="",
+                legend=alt.Legend(orient="bottom"),
+                scale=alt.Scale(range=list(theme.chart_palette)),
+            ),
             order=alt.Order("stack_order:Q", sort="ascending"),
             tooltip=[
                 alt.Tooltip("month:Q", title="Month"),
